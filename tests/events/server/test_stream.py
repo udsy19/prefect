@@ -10,8 +10,14 @@ from prefect.server.events.filters import (
     EventFilter,
     EventNameFilter,
     EventOccurredFilter,
+    EventRelatedFilter,
 )
-from prefect.server.events.schemas.events import Event, ReceivedEvent, Resource
+from prefect.server.events.schemas.events import (
+    Event,
+    ReceivedEvent,
+    RelatedResource,
+    Resource,
+)
 from prefect.types._datetime import now
 
 pytestmark = pytest.mark.clear_db
@@ -250,3 +256,29 @@ async def test_event_filter_is_applied_to_event_stream(
     # event 2 will be skipped because it doesn't match the filter
     streamed = await anext_event(filtered_subscription)
     assert streamed == received_event3
+
+
+async def test_related_filter_is_applied_to_event_stream(
+    distributor_running: None,
+    default_liberal_filter: EventFilter,
+    received_event1: ReceivedEvent,
+    received_event2: ReceivedEvent,
+):
+    filter_by_related = default_liberal_filter.model_copy()
+    filter_by_related.related = EventRelatedFilter(role=["flow-run"])
+
+    received_event2.related = [
+        RelatedResource(
+            {
+                "prefect.resource.id": "prefect.flow-run.123",
+                "prefect.resource.role": "flow-run",
+            }
+        )
+    ]
+
+    async with stream.events(filter_by_related) as filtered:
+        # event 1 has no related flow-run, so it should be skipped
+        await messaging.publish([received_event1, received_event2])
+
+        streamed = await anext_event(filtered)
+        assert streamed == received_event2

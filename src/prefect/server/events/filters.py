@@ -25,7 +25,7 @@ from prefect.server.utilities.text_search_parser import (
 from prefect.types import DateTime
 from prefect.utilities.collections import AutoEnum
 
-from .schemas.events import Event, Resource, ResourceSpecification
+from .schemas.events import Event, RelatedResource, Resource, ResourceSpecification
 
 if TYPE_CHECKING:
     from sqlalchemy.sql.expression import ColumnElement, ColumnExpressionArgument
@@ -406,6 +406,29 @@ class EventRelatedFilter(EventDataFilter):
     labels: Optional[ResourceSpecification] = Field(
         None, description="Only include events for related resources with these labels"
     )
+
+    def includes(self, event: Event) -> bool:
+        if not (self.id or self.role or self.resources_in_roles or self.labels):
+            return True
+        return any(self._includes(resource) for resource in event.related)
+
+    def _includes(self, resource: RelatedResource) -> bool:
+        if self.id and resource.id not in self.id:
+            return False
+
+        if self.role and resource.role not in self.role:
+            return False
+
+        if (
+            self.resources_in_roles
+            and (resource.id, resource.role) not in self.resources_in_roles
+        ):
+            return False
+
+        if self.labels and not self.labels.matches(resource):
+            return False
+
+        return True
 
     @db_injector
     def build_where_clauses(
